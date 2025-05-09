@@ -128,8 +128,12 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 
 
-MEDIA_ROOT = BASE_DIR / 'uploads'
-MEDIA_URL = '/files/'
+# MEDIA_ROOT = BASE_DIR / 'uploads'
+# MEDIA_URL = '/files/'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = r'C:\Users\Idan\Desktop\All\SIGN TALK\Full dataset'
+
 
 STATICFILES_DIRS = (
     os.path.join(BASE_DIR, 'static'), 

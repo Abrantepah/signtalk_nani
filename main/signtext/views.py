@@ -16,7 +16,9 @@ mp_holistic = mp.solutions.holistic
 from django.http import HttpResponseBadRequest, JsonResponse
 from django.contrib.sessions.backends.db import SessionStore
 from PIL import Image
+from django.conf import settings
 import requests
+from . import text_2_sign, search_video
 
 from django.core.paginator import Paginator
 
@@ -192,31 +194,89 @@ def display_landmarks(image):
             mp_drawing.plot_landmarks(
             results.pose_world_landmarks, mp_holistic.POSE_CONNECTIONS)
             
-    
+from pathlib import Path   
 
 def textsign(request):
-    word = request.GET.get('q') if request.GET.get('q') != None else ""
-    
+    word = request.GET.get('q') if request.GET.get('q') is not None else ""
 
     context = {}
-    image = None
+    video_urls = []
+    gif_url = []
+    media_root_path = Path(settings.MEDIA_ROOT)
+    sentence_dataset_path = media_root_path / "merged"
+    word_dataset_path = media_root_path / "words_output1"
+    gif_paths = media_root_path / "words_output"
+
+    print(f"directory for sentence videos: {sentence_dataset_path}")
+    mode = None  # 🔒 fix scope issue
 
     if word != "":
-        word = word.upper() + ".gif"
+        response = text_2_sign.retrieve_video(word)
+        print(f"Response: {response}")
 
-        print(word)
-        
-        
-        context = {
-            "word" : word
-        }
-    
+        if response is not None:
+            mode = response.get('mode')
+            videos = response.get('videos', [])
+
+            if mode == "sentence":
+                label = videos[0]
+                print(f'label sentences hitting: {label}')
+                video_abs_path = search_video.search_video_by_label(sentence_dataset_path, label)
+                gif_abs_paths = search_video.search_word_gifs_by_labels(gif_paths, [label])
+                print(f"Sentence Video Path: {video_abs_path}")
+                print(f"gif file path: {gif_abs_paths}")
+
+                if video_abs_path:
+                    video_file_name = os.path.basename(video_abs_path)
+                    print(f"video file name: {video_file_name}")
+                    video_urls.append(settings.MEDIA_URL + "merged/" + video_file_name)
+                else:
+                    video_urls.append(None)
+                    
+                from urllib.parse import quote
+
+
+                for abs_path in gif_abs_paths:
+                    if abs_path:
+                        gif_file_name = os.path.basename(abs_path)
+                        gif_url.append(settings.MEDIA_URL + "pose_landmarks/" + gif_file_name)
+                        print(f"gif url: {gif_url}")
+                    else:
+                        gif_url.append(None)
     
 
+            elif mode == "word-by-word":
+                labels = videos
+                video_abs_paths = search_video.search_word_videos_by_labels(word_dataset_path, labels)
+                gif_abs_paths = search_video.search_word_gifs_by_labels(gif_paths, labels)
+                print(f"Word-by-word Video Paths: {video_abs_paths}")
+                print(f"Word-by-word gif Paths: {gif_abs_paths}")
+
+                for abs_path in video_abs_paths:
+                    if abs_path:
+                        video_file_name = os.path.basename(abs_path)
+                        video_urls.append(settings.MEDIA_URL + "words_output1/" + video_file_name)
+                    else:
+                        video_urls.append(None)
+
+                for abs_path in gif_abs_paths:
+                    if abs_path:
+                        gif_file_name = os.path.basename(abs_path)
+                        gif_url.append(settings.MEDIA_URL + "words_output/" + gif_file_name)
+                    else:
+                        gif_url.append(None)
+        else:
+            video_urls = []
+            gif_url = []
+
+    context = {
+        "mode": mode,
+        "word": word,
+        "video_paths": video_urls,
+        "gif_paths": gif_url
+    }
 
     return render(request, 'signtext/textsign.html', context=context)
-
-
 
 
 def index(request):
