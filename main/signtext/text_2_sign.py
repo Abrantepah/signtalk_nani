@@ -18,21 +18,21 @@ embedding_model = HuggingFaceBgeEmbeddings(
     model_kwargs={"device": "cpu"},
     encode_kwargs={"normalize_embeddings": True}
 )
-# Load your prompt-response CSV (sentence + video ID)
-df = pd.read_csv(r"C:\Users\Idan\Desktop\Projects\signtalk_nani\main\staticfiles\final_prompt_response.csv")  # must have "prompt" and "response" columns
+# # Load your prompt-response CSV (sentence + video ID)
+# df = pd.read_csv(r"C:\Users\Idan\Desktop\Projects\signtalk_nani\main\staticfiles\final_prompt_response.csv")  # must have "prompt" and "response" columns
 
-# Convert each row into a Langchain Document
-docs = [
-    Document(
-        page_content=str(row["prompt"]),
-        metadata={"response": row["response"]}
-    )
-    for _, row in df.iterrows()
-]
+# # Convert each row into a Langchain Document 
+# docs = [
+#     Document(
+#         page_content=str(row["prompt"]),
+#         metadata={"response": row["response"]}
+#     )
+#     for _, row in df.iterrows()
+# ]
 
-# Embed and save to FAISS
-vectordb = FAISS.from_documents(docs, embedding=embedding_model)
-vectordb.save_local("sign_retrieval_index")
+# # Embed and save to FAISS
+# vectordb = FAISS.from_documents(docs, embedding=embedding_model)
+# vectordb.save_local("sign_retrieval_index")
 
 # Load the FAISS vectorstore (make sure allow_dangerous_deserialization=True)
 vectorstore_sentence = FAISS.load_local(
@@ -56,21 +56,21 @@ embedding_model = HuggingFaceBgeEmbeddings(
 )
 
 # --- 2. Load your CSV ---
-df = pd.read_csv(r"C:\Users\Idan\Desktop\Projects\signtalk_nani\main\staticfiles\words_meta.csv")
+# df = pd.read_csv(r"C:\Users\Idan\Desktop\Projects\signtalk_nani\main\staticfiles\words_meta.csv")
 
-# --- 3. Create documents ---
-docs = [
-    Document(
-        page_content=str(row["SIGN"]),  # Ensure it's a string
-        metadata={"response": str(row["ID"])}
-    )
-    for _, row in df.iterrows()
-]
+# # --- 3. Create documents ---
+# docs = [
+#     Document(
+#         page_content=str(row["SIGN"]),  # Ensure it's a string
+#         metadata={"response": str(row["ID"])}
+#     )
+#     for _, row in df.iterrows()
+# ]
 
-# --- 4. Create vectorstore ---
-vectordb = Chroma.from_documents(docs, embedding=embedding_model, persist_directory="sign_retrieval_chroma")
-print("✅ Vector store created successfully!")
-vectordb.persist()
+# # --- 4. Create vectorstore ---
+# vectordb = Chroma.from_documents(docs, embedding=embedding_model, persist_directory="sign_retrieval_chroma")
+# print("✅ Vector store created successfully!")
+# vectordb.persist()
 
 # --- 5. Load vectorstore ---
 vectorstore_words = Chroma(persist_directory="sign_retrieval_chroma", embedding_function=embedding_model)

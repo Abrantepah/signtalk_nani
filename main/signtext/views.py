@@ -18,13 +18,14 @@ from django.contrib.sessions.backends.db import SessionStore
 from PIL import Image
 from django.conf import settings
 import requests
-from . import text_2_sign, search_video
-
+from . import text_2_sign, search_video, audio, sign_2_text
 from django.core.paginator import Paginator
-
+from pathlib import Path   
+from django.views.decorators.csrf import csrf_exempt
+import tempfile
+import time
 
 s = SessionStore()
-
 
 module_dir = os.path.dirname(__file__)   #get current directory
 model_path = os.path.join(module_dir, 'static/signmodel.h5')
@@ -159,16 +160,71 @@ def livefeed(request):
     except:  # This is bad!
         pass
 
-def signtext(request):
-    # request.session["new_pred"] = ' '.join(config.new_pred)
-    request.session.modified = True
 
-    context = {
-        "sentence" : ' '.join(list(s['new_pred'])),
-        "feedback": s['feedback'],
-        's': ' '.join(s['new_pred'])
-    }
-    return render(request, 'signtext/signtext.html', context=context)
+# Global control variables
+is_recording = False
+recording_thread = None
+
+def start_recording(request):
+    global is_recording, recording_thread
+    if not is_recording:
+        is_recording = True
+        recording_thread = threading.Thread(target=record_video)
+        recording_thread.start()
+        return JsonResponse({"status": "recording started"})
+    else:
+        return JsonResponse({"status": "already recording"})
+
+def stop_recording(request):
+    global is_recording, recording_thread
+    if is_recording:
+        is_recording = False
+        recording_thread.join()
+        # After recording, predict translation
+        translation = sign_2_text.predict_translation_from_video("realtime_test_video.mp4")
+        return JsonResponse({"status": "recording stopped", "translation": translation})
+    else:
+        return JsonResponse({"status": "not recording"})
+
+def record_video():
+    global is_recording
+    cap = cv2.VideoCapture(0)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    out = cv2.VideoWriter("realtime_test_video.mp4", cv2.VideoWriter_fourcc(*'mp4v'), 20, (640, 480))
+
+    start_time = time.time()
+    while is_recording and (time.time() - start_time) < 11:  # Max 11s
+        ret, frame = cap.read()
+        if ret:
+            out.write(frame)
+
+    out.release()
+    cap.release()
+
+
+def signtext(request):
+    if request.method == "POST":
+        video_file = request.FILES.get("video")
+        if video_file:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmpfile:
+                for chunk in video_file.chunks():
+                    tmpfile.write(chunk)
+                tmpfile_path = tmpfile.name
+
+            translation_text = sign_2_text.predict_translation_from_video(tmpfile_path)
+
+            os.remove(tmpfile_path)
+
+            # Return JSON response with translation
+            return JsonResponse({"translation": translation_text})
+
+        # If no video uploaded, return error JSON
+        return JsonResponse({"error": "No video uploaded"}, status=400)
+
+    # For GET request render the page normally
+    return render(request, 'signtext/signtext.html')
+
 
 def practice(request):
     # request.session["new_pred"] = ' '.join(config.new_pred)
@@ -194,7 +250,96 @@ def display_landmarks(image):
             mp_drawing.plot_landmarks(
             results.pose_world_landmarks, mp_holistic.POSE_CONNECTIONS)
             
-from pathlib import Path   
+
+@csrf_exempt
+def audioToSign(request):
+    transcribed_text = ""
+    video_ids = []
+    video_urls = []
+    gif_url = []
+    mode = None
+
+    if request.method == "POST":
+        audio_file = request.FILES.get("audio")
+        if audio_file:
+            # Save uploaded audio to a temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmpfile:
+                for chunk in audio_file.chunks():
+                    tmpfile.write(chunk)
+                tmpfile_path = tmpfile.name
+
+            # Process audio through your transcription + video retrieval pipeline
+            transcribed_text, video_ids = audio.process_audio_file(tmpfile_path)
+
+            # Clean up temp file
+            os.remove(tmpfile_path)
+
+            # Now pass transcribed_text into the video retrieval pipeline
+            media_root_path = Path(settings.MEDIA_ROOT)
+            sentence_dataset_path = media_root_path / "merged"
+            word_dataset_path = media_root_path / "words_output1"
+            gif_paths = media_root_path / "words_output"
+
+            print(f"directory for sentence videos: {sentence_dataset_path}")
+            
+            if transcribed_text.strip() != "":
+                response = text_2_sign.retrieve_video(transcribed_text)
+                print(f"Response: {response}")
+
+                if response is not None:
+                    mode = response.get('mode')
+                    videos = response.get('videos', [])
+
+                    if mode == "sentence":
+                        label = videos[0]
+                        print(f'label sentences hitting: {label}')
+                        video_abs_path = search_video.search_video_by_label(sentence_dataset_path, label)
+                        gif_abs_paths = search_video.search_word_gifs_by_labels(gif_paths, [label])
+
+                        if video_abs_path:
+                            video_file_name = os.path.basename(video_abs_path)
+                            video_urls.append(settings.MEDIA_URL + "merged/" + video_file_name)
+                        else:
+                            video_urls.append(None)
+
+                        for abs_path in gif_abs_paths:
+                            if abs_path:
+                                gif_file_name = os.path.basename(abs_path)
+                                gif_url.append(settings.MEDIA_URL + "pose_landmarks/" + gif_file_name)
+                            else:
+                                gif_url.append(None)
+
+                    elif mode == "word-by-word":
+                        labels = videos
+                        output_video = r"C:\Users\Idan\Desktop\All\SIGN TALK\Full dataset\merged_sentence.mp4"
+                        video_abs_paths = search_video.search_word_videos_by_labels(word_dataset_path, labels)
+                        merged_videos_path = search_video.concatenate_videos(video_abs_paths, output_video)
+                        gif_abs_paths = search_video.search_word_gifs_by_labels(gif_paths, labels)
+
+                        video_file_name = os.path.basename(merged_videos_path)
+                        video_urls.append(settings.MEDIA_URL + video_file_name)
+
+                        for abs_path in gif_abs_paths:
+                            if abs_path:
+                                gif_file_name = os.path.basename(abs_path)
+                                gif_url.append(settings.MEDIA_URL + "words_output/" + gif_file_name)
+                            else:
+                                gif_url.append(None)
+                else:
+                    video_urls = []
+                    gif_url = []
+
+    # Final context passed to template
+    context = {
+        "mode": mode,
+        "transcribed_text": transcribed_text,
+        "video_ids": video_ids,
+        "video_paths": video_urls,
+        "gif_paths": gif_url
+    }
+
+    return render(request, "signtext/textsign1.html", context)
+
 
 def textsign(request):
     word = request.GET.get('q') if request.GET.get('q') is not None else ""
@@ -243,21 +388,30 @@ def textsign(request):
                         print(f"gif url: {gif_url}")
                     else:
                         gif_url.append(None)
-    
+            
+
 
             elif mode == "word-by-word":
                 labels = videos
+                # merged videos output path
+                output_video = r"C:\Users\Idan\Desktop\All\SIGN TALK\Full dataset\merged_sentence.mp4"
                 video_abs_paths = search_video.search_word_videos_by_labels(word_dataset_path, labels)
+                merged_videos_path = search_video.concatenate_videos(video_abs_paths, output_video)
+                
                 gif_abs_paths = search_video.search_word_gifs_by_labels(gif_paths, labels)
-                print(f"Word-by-word Video Paths: {video_abs_paths}")
+                print(f"Word-by-word Video Paths: {merged_videos_path}")
                 print(f"Word-by-word gif Paths: {gif_abs_paths}")
 
-                for abs_path in video_abs_paths:
-                    if abs_path:
-                        video_file_name = os.path.basename(abs_path)
-                        video_urls.append(settings.MEDIA_URL + "words_output1/" + video_file_name)
-                    else:
-                        video_urls.append(None)
+                # for abs_path in merged_videos_path:
+                #     if abs_path:
+                #         video_file_name = os.path.basename(abs_path)
+                #         video_urls.append(settings.MEDIA_URL + "words_output1/" + video_file_name)
+                #     else:
+                #         video_urls.append(None)
+                
+                video_file_name = os.path.basename(merged_videos_path)
+                video_urls.append(settings.MEDIA_URL + video_file_name)
+                
 
                 for abs_path in gif_abs_paths:
                     if abs_path:
@@ -276,7 +430,7 @@ def textsign(request):
         "gif_paths": gif_url
     }
 
-    return render(request, 'signtext/textsign.html', context=context)
+    return render(request, 'signtext/textsign1.html', context=context)
 
 
 def index(request):

@@ -1,5 +1,8 @@
 import os
 import random
+from moviepy import VideoFileClip, concatenate_videoclips
+
+
 
 #search videos on one label and sentence level
 def search_video_by_label(directory, label):
@@ -27,6 +30,8 @@ def search_video_by_label(directory, label):
     
     return None
 
+
+
 #search video on words (could be multiple ids in labels array)
 def search_word_videos_by_labels(directory, labels):
     """
@@ -53,6 +58,25 @@ def search_word_videos_by_labels(directory, labels):
     return matches
 
 
+def concatenate_videos(video_paths, output_path):
+    clips = []
+    for path in video_paths:
+        if path and os.path.exists(path):
+            clip = VideoFileClip(path)
+            clips.append(clip)
+        else:
+            print(f"⚠️ Video not found: {path}")
+
+    if clips:
+        final_clip = concatenate_videoclips(clips, method="compose")  # 'compose' handles size/fps differences
+        final_clip.write_videofile(output_path, codec='libx264')
+        print(f"✅ Merged video saved to: {output_path}")
+        return output_path
+    else:
+        print("❌ No videos to merge.")
+        return None
+
+
 
 def search_word_gifs_by_labels(directory, labels):
     """
@@ -77,3 +101,68 @@ def search_word_gifs_by_labels(directory, labels):
         matches.append(file_path)
 
     return matches
+
+
+
+
+
+# def get_or_create_merged_video(labels, video_paths, media_root_path):
+#     sentence_csv_path = media_root_path / "word_to_sentence_map.csv"
+#     os.makedirs(sentence_csv_path.parent, exist_ok=True)
+
+#     # Construct sentence string
+#     sentence = " ".join(labels)
+
+#     # Check if sentence exists in CSV
+#     existing_id = None
+#     if os.path.exists(sentence_csv_path):
+#         with open(sentence_csv_path, mode='r', newline='', encoding='utf-8') as file:
+#             reader = csv.reader(file)
+#             for row in reader:
+#                 if len(row) >= 2 and row[1] == sentence:
+#                     existing_id = row[0]
+#                     break
+
+#     if existing_id:
+#         print(f"✅ Existing merged video found for sentence: '{sentence}' with ID: {existing_id}")
+#         existing_video_path = media_root_path / "merged_sentences" / f"{existing_id}.mp4"
+#         return str(existing_video_path), existing_id
+
+#     # If not, merge videos
+#     print(f"🔄 Merging new video for sentence: '{sentence}'")
+
+#     # Determine next ID
+#     if os.path.exists(sentence_csv_path):
+#         with open(sentence_csv_path, mode='r', newline='', encoding='utf-8') as file:
+#             reader = csv.reader(file)
+#             ids = [int(row[0]) for row in reader if row and row[0].isdigit()]
+#             next_id = max(ids, default=0) + 1
+#     else:
+#         next_id = 1
+
+#     output_video_path = media_root_path / "merged_words_videos" / f"{next_id}.mp4"
+
+#     # Concatenate videos
+#     clips = []
+#     for path in video_paths:
+#         if path and os.path.exists(path):
+#             clip = VideoFileClip(path)
+#             clips.append(clip)
+#         else:
+#             print(f"⚠️ Video not found: {path}")
+
+#     if clips:
+#         final_clip = concatenate_videoclips(clips, method="compose")
+#         final_clip.write_videofile(str(output_video_path), codec='libx264')
+#         print(f"✅ Merged video saved to: {output_video_path}")
+
+#         # Append mapping to CSV
+#         with open(sentence_csv_path, mode='a', newline='', encoding='utf-8') as file:
+#             writer = csv.writer(file)
+#             writer.writerow([next_id, sentence])
+
+#         return str(output_video_path), next_id
+#     else:
+#         print("❌ No videos to merge.")
+#         return None, None
+
